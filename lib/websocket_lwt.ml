@@ -13,6 +13,9 @@ let set_tcp_nodelay flow =
   | TCP { fd; _ } -> Lwt_unix.setsockopt fd Lwt_unix.TCP_NODELAY true
   | _ -> ()
 
+module CReq = Cohttp.Request.Make(Cohttp_lwt_unix_io)
+module CRes = Cohttp.Response.Make(Cohttp_lwt_unix_io)
+
 let with_connection ?(extra_headers = Cohttp.Header.init ()) ~ctx client uri =
   let connect () =
     let module C = Cohttp in
@@ -27,8 +30,8 @@ let with_connection ?(extra_headers = Cohttp.Header.init ()) ~ctx client uri =
     Conduit_lwt_unix.(connect ~ctx:default_ctx client) >>= fun (flow, ic, oc) ->
     set_tcp_nodelay flow;
     let drain_handshake () =
-      CU.Request.write (fun writer -> Lwt.return_unit) req oc >>= fun () ->
-      CU.Response.read ic >>= (function
+      CReq.write (fun writer -> Lwt.return_unit) req oc >>= fun () ->
+      CRes.read ic >>= (function
           | `Ok r -> Lwt.return r
           | `Eof -> Lwt.fail End_of_file
           | `Invalid s -> Lwt.fail @@ Failure s) >>= fun response ->
@@ -72,7 +75,7 @@ let establish_server ?timeout ?stop ~ctx ~mode react =
   let module CU = Cohttp_lwt_unix in
   let id = ref @@ -1 in
   let server_fun id (ic, oc) =
-    (CU.Request.read ic >>= function
+    (CReq.read ic >>= function
       | `Ok r -> Lwt.return r
       | `Eof ->
         (* Remote endpoint closed connection. No further action necessary here. *)
@@ -103,7 +106,7 @@ let establish_server ?timeout ?stop ~ctx ~mode react =
         ~status:`Switching_protocols
         ~encoding:C.Transfer.Unknown
         ~headers:response_headers () in
-    CU.Response.write (fun writer -> Lwt.return_unit) response oc >>= fun () ->
+    CRes.write (fun writer -> Lwt.return_unit) response oc >>= fun () ->
     let send_frame = send_frame ~masked:false oc in
     let read_frame = make_read_frame ~masked:false (ic, oc) in
     react id request read_frame send_frame
